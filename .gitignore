@@ -21,3 +21,4 @@
 go.work
 .idea
 bin
+/vendor.protogen/

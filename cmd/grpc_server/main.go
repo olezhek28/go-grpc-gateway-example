@@ -2,19 +2,26 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"net"
+	"net/http"
+	"sync"
 
 	"github.com/brianvoe/gofakeit"
+	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
+	"github.com/pkg/errors"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	desc "github.com/olezhek28/go-grpc-gateway-example/pkg/note_v1"
 )
 
-const grpcPort = 50051
+const (
+	grpcAddress = ":50051"
+	httpAddress = ":8080"
+)
 
 type server struct {
 	desc.UnimplementedNoteV1Server
@@ -40,18 +47,58 @@ func (s *server) Get(ctx context.Context, req *desc.GetRequest) (*desc.GetRespon
 }
 
 func main() {
-	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", grpcPort))
+	ctx := context.Background()
+
+	wg := &sync.WaitGroup{}
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+
+		if err := startGrpcServer(); err != nil {
+			log.Fatal(err)
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+
+		if err := startHttpServer(ctx); err != nil {
+			log.Fatal(err)
+		}
+	}()
+
+	wg.Wait()
+}
+
+func startGrpcServer() error {
+	lis, err := net.Listen("tcp", grpcAddress)
 	if err != nil {
-		log.Fatalf("failed to listen: %v", err)
+		return errors.Wrap(err, "failed to listen")
 	}
 
 	s := grpc.NewServer()
 	reflection.Register(s)
 	desc.RegisterNoteV1Server(s, &server{})
 
-	log.Printf("server listening at %v", lis.Addr())
+	log.Printf("server listening at %v\n", grpcAddress)
 
-	if err = s.Serve(lis); err != nil {
-		log.Fatalf("failed to serve: %v", err)
+	return s.Serve(lis)
+}
+
+func startHttpServer(ctx context.Context) error {
+	mux := runtime.NewServeMux()
+
+	opts := []grpc.DialOption{
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	}
+
+	err := desc.RegisterNoteV1HandlerFromEndpoint(ctx, mux, grpcAddress, opts)
+	if err != nil {
+		return err
+	}
+
+	log.Printf("http server listening at %v\n", httpAddress)
+
+	return http.ListenAndServe(httpAddress, mux)
 }
