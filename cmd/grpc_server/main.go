@@ -9,7 +9,6 @@ import (
 
 	"github.com/brianvoe/gofakeit"
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
-	"github.com/pkg/errors"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/reflection"
@@ -19,8 +18,8 @@ import (
 )
 
 const (
-	grpcAddress = ":50051"
-	httpAddress = ":8080"
+	grpcAddress = "localhost:50051"
+	httpAddress = "localhost:8080"
 )
 
 type server struct {
@@ -72,18 +71,22 @@ func main() {
 }
 
 func startGrpcServer() error {
-	lis, err := net.Listen("tcp", grpcAddress)
+	grpcServer := grpc.NewServer(
+		grpc.Creds(insecure.NewCredentials()),
+	)
+
+	reflection.Register(grpcServer)
+
+	desc.RegisterNoteV1Server(grpcServer, &server{})
+
+	list, err := net.Listen("tcp", grpcAddress)
 	if err != nil {
-		return errors.Wrap(err, "failed to listen")
+		return err
 	}
 
-	s := grpc.NewServer()
-	reflection.Register(s)
-	desc.RegisterNoteV1Server(s, &server{})
+	log.Printf("gRPC server listening at %v\n", grpcAddress)
 
-	log.Printf("server listening at %v\n", grpcAddress)
-
-	return s.Serve(lis)
+	return grpcServer.Serve(list)
 }
 
 func startHttpServer(ctx context.Context) error {
